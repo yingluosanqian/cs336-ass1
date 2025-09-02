@@ -83,12 +83,13 @@ def run_swiglu(
     """
     # Example:
     # If your state dict keys match, you can use `load_state_dict()`
-    # swiglu.load_state_dict(weights)
-    # You can also manually assign the weights
-    # swiglu.w1.weight.data = w1_weight
-    # swiglu.w2.weight.data = w2_weight
-    # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    swiglu = cs336_basics.nn_basic.SwiGLU(d_model, d_ff)
+    swiglu.load_state_dict({
+        'w1_weight': w1_weight,
+        'w2_weight': w2_weight,
+        'w3_weight': w3_weight,
+    })
+    return swiglu(in_features)
 
 
 def run_scaled_dot_product_attention(
@@ -205,7 +206,9 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
-    raise NotImplementedError
+    rope = cs336_basics.nn_basic.RotaryPositionalEmbedding(
+        theta, d_k, max_seq_len)
+    return rope(in_query_or_key, token_positions)
 
 
 def run_transformer_block(
@@ -383,7 +386,9 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    raise NotImplementedError
+    rms_norm = cs336_basics.nn_basic.RMSNorm(d_model, eps)
+    torch.nn.Module.load_state_dict(rms_norm, {'weights': weights})
+    return rms_norm(in_features)
 
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
