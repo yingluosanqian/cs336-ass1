@@ -1,6 +1,6 @@
 
 import torch
-from torch import Tensor
+from torch import Tensor, LongTensor
 
 
 def init_linear_weights(shape: tuple, d_in: int, d_out: int, *args, **kwargs) -> Tensor:

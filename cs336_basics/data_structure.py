@@ -12,7 +12,7 @@ class MaxHeapElem(Generic[T]):
         self.value = value
 
     def __lt__(self, other: 'MaxHeapElem[T]') -> bool:
-        return self.value > other.value
+        return self.value > other.value  # type: ignore
 
     def __eq__(self, other: 'MaxHeapElem[T]') -> bool:
         return self.value == other.value
@@ -28,8 +28,10 @@ class MaxHeap(Generic[T]):
     def push(self, elem: tuple[int, tuple[bytes, bytes]]):
         heapq.heappush(self._elements, MaxHeapElem(elem))
 
-    def pop(self) -> tuple[int, tuple[bytes, bytes]] | None:
-        return heapq.heappop(self._elements).value if self._elements else None
+    def pop(self) -> tuple[int, tuple[bytes, bytes]]:
+        if self.is_empty():
+            raise IndexError("pop from an empty MaxHeap")
+        return heapq.heappop(self._elements).value
 
     def is_empty(self):
         return not self._elements

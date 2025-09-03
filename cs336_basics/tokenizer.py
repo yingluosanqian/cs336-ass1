@@ -33,7 +33,7 @@ def pre_tokenize_infer(
     chunks: Iterable[str],
     special_tokens: list[str] | None,
     token_pattern=r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""",
-) -> Iterator[str]:
+) -> Iterator[bytes]:
     # If special_tokens is None, no need to capture them
     has_special_tokens = special_tokens is not None
     if has_special_tokens:
@@ -46,7 +46,7 @@ def pre_tokenize_infer(
         for text in texts:
             if not text:
                 continue
-            if has_special_tokens and text in special_tokens:
+            if special_tokens is not None and text in special_tokens:
                 yield text.encode("utf-8")
             else:
                 for match in token_pattern.finditer(text):
@@ -75,17 +75,17 @@ class PairManager():
     def __init__(self, token_counter: Counter):
         self._pair_counter: dict[tuple[bytes, bytes],
                                  IndexManager] = defaultdict(IndexManager)
-        self._pairs: tuple[tuple[tuple[bytes, ...], int]] = ()
+        self._pairs: list[tuple[tuple[bytes, ...], int]] = []
         self._next: list[list[int]] = []
         self._prev: list[list[int]] = []
         self._max_heap: MaxHeap = MaxHeap()
         self._initialize(token_counter)
 
     def _initialize(self, token_counter: Counter):
-        self._pairs = tuple(
+        self._pairs = [
             (tuple(bytes([byte]) for byte in token), count)
             for token, count in token_counter.items()
-        )
+        ]
         self._next = [list(range(1, len(pair) + 1)) for pair, _ in self._pairs]
         self._prev = [list(range(-1, len(pair) - 1))
                       for pair, _ in self._pairs]
@@ -160,7 +160,7 @@ def train_bpe(
         **{i: token.encode("utf-8") for i, token in enumerate(special_tokens)},
         **{i + len(special_tokens): bytes([i]) for i in range(256)}
     }
-    merges: list[tuple[bytes, bytes], int] = []
+    merges: list[tuple[bytes, bytes]] = []
     chunks = load_text_from_file(input_path)
     token_counter = Counter(pre_tokenize_train(chunks, special_tokens))
     pair_manager = PairManager(token_counter)
@@ -210,34 +210,34 @@ class Tokenizer:
         cls,
         vocab_filepath: str,
         merges_filepath: str,
-        special_tokens: list[str] | str = None
+        special_tokens: list[str] | None = None
     ):
         raise ValueError("Not Implemented.")
 
     def _encode_token(self, token: bytes) -> list[int]:
         if not token:
             return []
-        token = [bytes([b]) for b in token]
+        tokens: list[bytes] = [bytes([b]) for b in token]
         done = True
         while done:
             done = False
             apply_id, apply_order = -1, -1
             # Iterate and pick the earlist merge
-            for i in range(len(token) - 1):
-                pair = (token[i], token[i + 1])
+            for i in range(len(tokens) - 1):
+                pair = (tokens[i], tokens[i + 1])
                 if pair in self.merges_dict:
                     if apply_order == -1 or apply_order > self.merges_dict[pair]:
                         apply_id, apply_order = i, self.merges_dict[pair]
             # Apply the merge if available
             if apply_id != -1:
-                token = token[:apply_id] + [token[apply_id] + token[apply_id + 1]] + token[apply_id + 2:]
+                tokens = tokens[:apply_id] + [tokens[apply_id] + tokens[apply_id + 1]] + tokens[apply_id + 2:]
                 done = True
-        return [self.bacov[t] for t in token]
+        return [self.bacov[t] for t in tokens]
 
     def encode(self, text: str) -> list[int]:
-        text = pre_tokenize_infer((text,), self.special_tokens)
+        text_bytes = pre_tokenize_infer((text,), self.special_tokens)
         result = []
-        for token in text:
+        for token in text_bytes:
             if token in self.special_tokens_encoded:
                 # Map special token to id directly
                 result.append(self.bacov[token])

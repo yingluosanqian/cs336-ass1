@@ -22,12 +22,12 @@ class Linear(nn.Module):
 class Embedding(nn.Module):
     def __init__(self, num_embeddings: int, embedding_dim: int, device=None, dtype=None):
         super().__init__()
-        self.weights: Float[LongTensor, "vocab_size d_model"] = nn.Parameter(
+        self.weights: Float[Tensor, "vocab_size d_model"] = nn.Parameter(
             init_embedding_weights((num_embeddings, embedding_dim),
                                    device=device, dtype=dtype)
         )
 
-    def forward(self, token_ids: Int[Tensor, "... seq"]) -> Float[Tensor, "... seq d_model"]:
+    def forward(self, token_ids: Int[LongTensor, "... seq"]) -> Float[Tensor, "... seq d_model"]:
         return self.weights[token_ids]
 
 
@@ -36,13 +36,13 @@ class RMSNorm(nn.Module):
         super().__init__()
         self.d_model = d_model
         self.eps = eps
-        self.weights: Float[LongTensor, "d_model"] = nn.Parameter(
+        self.weights: Float[Tensor, "d_model"] = nn.Parameter(
             init_rmsnorm_weights((d_model,), device=device, dtype=dtype)
         )
 
     def forward(self, x: Float[Tensor, "... d_model"]) -> Float[Tensor, "... d_model"]:
         # Cast to FP32 first
-        in_type = x.type
+        in_type = x.dtype
         x = x.to(torch.float32)
 
         rs = torch.sum(x**2, dim=-1, keepdim=True)
@@ -89,6 +89,8 @@ class SwiGLU(nn.Module):
 class RotaryPositionalEmbedding(nn.Module):
     def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
         super().__init__()
+        self.cos_value: Float[Tensor, "max_seq_len half_d_k"]
+        self.sin_value: Float[Tensor, "max_seq_len half_d_k"]
         self.d_k = d_k
         if d_k % 2 > 0:
             raise ValueError("Rotary positional embedding requires even d_k")

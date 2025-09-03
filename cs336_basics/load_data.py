@@ -50,7 +50,7 @@ def find_chunk_boundaries(
     return sorted(set(chunk_boundaries))
 
 
-def load_text_from_file(file_path: str) -> Iterable[str]:
+def load_text_from_file(file_path: str | os.PathLike) -> Iterable[str]:
     with open(file_path, "rb") as f:
         num_processes = 4
         boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
