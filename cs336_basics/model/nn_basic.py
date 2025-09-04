@@ -5,7 +5,7 @@ from einops import rearrange, einsum
 from jaxtyping import Float, Int
 
 from .initialize import init_linear_weights, init_embedding_weights, init_rmsnorm_weights
-from .nn_function import scaled_dot_product_attention
+from .nn_function import scaled_dot_product_attention, softmax
 
 
 class Linear(nn.Module):
@@ -239,4 +239,72 @@ class PreNormTransformerBlock(nn.Module):
         # Sublayer 2: Position-wise Feed-Forward Network
         ffn_output = self.swiglu(self.rmsnorm_2(x))
         x = x + ffn_output
+        return x
+
+
+class TransformerLM(nn.Module):
+    def __init__(
+        self,
+        vocab_size: int,
+        context_length: int,
+        num_layers: int,
+        d_model: int,
+        num_heads: int,
+        d_ff: int,
+        rope_theta: float,
+        device=None,
+        dtype=None,
+    ):
+        '''
+        Args:
+            vocab_size (int): The size of the vocabulary, necessary for
+                determining the dimensionality of the token embedding matrix.
+            context_length (int): The maximum context length, necessary
+                for determining the dimensionality of the position embedding matrix.
+            num_layers (int): The number of Transformer blocks to use.
+            d_model (int): The dimensionality of the Transformer block inputs.
+            num_heads (int): The number of heads to use in multi-head self-attention.
+            d_ff (int): The dimensionality of the position-wise feed-forward inner layer.
+            rope_theta (float): Θ value for the RoPE
+        '''
+        super().__init__()
+
+        rope = RotaryPositionalEmbedding(
+            theta=rope_theta, d_k=d_model // num_heads, max_seq_len=context_length, device=device)
+        self.token_positions: Int[Tensor, "1 context_length"] = rearrange(
+            torch.arange(context_length, device=device), "context_length -> 1 context_length")
+
+        self.token_embedding = Embedding(vocab_size, d_model)
+        self.transformer_blocks = nn.ModuleList([
+            PreNormTransformerBlock(
+                d_model,
+                num_heads,
+                d_ff,
+                rope=rope,
+                device=device,
+                dtype=dtype,
+            )
+            for _ in range(num_layers)
+        ])
+        self.rms_norm = RMSNorm(d_model, device=device, dtype=dtype)
+        self.lm_head = Linear(d_model, vocab_size, device=device, dtype=dtype)
+
+    def forward(self, input_ids: Int[LongTensor, "batch seq"]) -> Float[Tensor, "batch seq vocab_size"]:
+        '''
+        Args:
+            input_ids (Int[LongTensor, "batch seq"]): Input token IDs.
+            token_positions (Int[LongTensor, "batch seq"] | None = None): Positional indices for each token.
+                If using RoPE, this should be provided. If using absolute positional embeddings,
+                this can be None.
+        Returns:
+            Float[Tensor, "batch seq vocab_size"]: The output logits for each token in the vocabulary.
+        '''
+        token_positions: Int[Tensor,
+                             "1 seq"] = self.token_positions[:, :input_ids.shape[-1]]
+
+        x: Float[Tensor, "batch seq d_model"] = self.token_embedding(input_ids)
+        for block in self.transformer_blocks:
+            x = block(x, token_positions=token_positions)
+        x: Float[Tensor, "batch seq d_model"] = self.rms_norm(x)
+        x: Float[Tensor, "batch seq vocab_size"] = self.lm_head(x)
         return x

@@ -411,7 +411,51 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    transformer_lm = cs336_basics.nn_basic.TransformerLM(
+        vocab_size=vocab_size,
+        context_length=context_length,
+        d_model=d_model,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        rope_theta=rope_theta,
+    )
+    # Token Embedding
+    transformer_lm.token_embedding.load_state_dict(
+        {'weights': weights['token_embeddings.weight']})
+    # Transformer Blocks
+    for layer_idx in range(num_layers):
+        layer_weights = {k.split(f"layers.{layer_idx}.")[-1]: v for k, v in weights.items()
+                         if k.startswith(f"layers.{layer_idx}.")}
+        transformer_block: cs336_basics.nn_basic.PreNormTransformerBlock = transformer_lm.transformer_blocks[
+            layer_idx]
+
+        # Attn
+        qkv_weights = torch.cat(
+            [layer_weights['attn.q_proj.weight'], layer_weights["attn.k_proj.weight"], layer_weights["attn.v_proj.weight"]], dim=0)
+        transformer_block.mha.qkv_proj.data.copy_(qkv_weights)
+        transformer_block.mha.o_proj.weights.data.copy_(
+            layer_weights["attn.output_proj.weight"])
+        # RMS-Norm 1
+        transformer_block.rmsnorm_1.load_state_dict(
+            {'weights': layer_weights['ln1.weight']})
+        # FFN
+        transformer_block.swiglu.w1.weights.data.copy_(
+            layer_weights['ffn.w1.weight'])
+        transformer_block.swiglu.w2.weights.data.copy_(
+            layer_weights['ffn.w2.weight'])
+        transformer_block.swiglu.w3.weights.data.copy_(
+            layer_weights['ffn.w3.weight'])
+        # RMS-Norm 2
+        transformer_block.rmsnorm_2.load_state_dict(
+            {'weights': layer_weights['ln2.weight']})
+
+    # Final RMS-Norm
+    transformer_lm.rms_norm.weights.data.copy_(weights['ln_final.weight'])
+    # LM Head
+    transformer_lm.lm_head.weights.data.copy_(weights['lm_head.weight'])
+
+    return transformer_lm(in_indices)
 
 
 def run_rmsnorm(
