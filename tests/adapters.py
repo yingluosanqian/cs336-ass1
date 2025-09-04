@@ -428,7 +428,7 @@ def run_transformer_lm(
         layer_weights = {k.split(f"layers.{layer_idx}.")[-1]: v for k, v in weights.items()
                          if k.startswith(f"layers.{layer_idx}.")}
         transformer_block: cs336_basics.nn_basic.PreNormTransformerBlock = transformer_lm.transformer_blocks[
-            layer_idx]
+            layer_idx]  # type: ignore
 
         # Attn
         qkv_weights = torch.cat(
