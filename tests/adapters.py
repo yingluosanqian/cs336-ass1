@@ -298,7 +298,38 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    # RoPE
+    d_k = d_model // num_heads
+    rope = cs336_basics.nn_basic.RotaryPositionalEmbedding(
+        theta, d_k, max_seq_len)
+
+    # Transformer Block
+    transformer_block = cs336_basics.nn_basic.PreNormTransformerBlock(
+        d_model, num_heads, d_ff, rope=rope)
+
+    # Attn
+    qkv_weights = torch.cat(
+        [weights['attn.q_proj.weight'], weights["attn.k_proj.weight"], weights["attn.v_proj.weight"]], dim=0)
+    transformer_block.mha.qkv_proj.data.copy_(qkv_weights)
+    transformer_block.mha.o_proj.weights.data.copy_(
+        weights["attn.output_proj.weight"])
+    # RMS-Norm 1
+    transformer_block.rmsnorm_1.load_state_dict(
+        {'weights': weights['ln1.weight']})
+    # FFN
+    transformer_block.swiglu.w1.weights.data.copy_(weights['ffn.w1.weight'])
+    transformer_block.swiglu.w2.weights.data.copy_(weights['ffn.w2.weight'])
+    transformer_block.swiglu.w3.weights.data.copy_(weights['ffn.w3.weight'])
+    # RMS-Norm 2
+    transformer_block.rmsnorm_2.load_state_dict(
+        {'weights': weights['ln2.weight']})
+
+    # Token-positions
+    token_positions = torch.arange(
+        in_features.shape[-2], device=in_features.device)
+    import einops
+    token_positions = einops.rearrange(token_positions, "seq -> 1 seq")
+    return transformer_block(in_features, token_positions)
 
 
 def run_transformer_lm(

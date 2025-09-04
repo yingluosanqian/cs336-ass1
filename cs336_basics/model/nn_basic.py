@@ -144,7 +144,7 @@ class CausalMultiheadAttention(nn.Module):
             ], dim=0)
         )
         self.o_proj = Linear(num_heads * self.head_dim,
-                             d_model, dtype=dtype, device=device)
+                             d_model, device=device, dtype=dtype)
 
     def forward(
         self,
@@ -174,3 +174,36 @@ class CausalMultiheadAttention(nn.Module):
         attn = rearrange(
             attn, "... num_heads seq d_v -> ... seq (num_heads d_v)")
         return self.o_proj(attn)
+
+
+class PreNormTransformerBlock(nn.Module):
+    def __init__(self, d_model: int, num_heads: int, d_ff: int,
+                 rope: RotaryPositionalEmbedding, device=None, dtype=None) -> None:
+        '''
+        Args:
+            d_model (int): Dimensionality of the Transformer block inputs.
+            num_heads (int): Number of heads to use in multi-head self-attention.
+            d_ff (int): Dimensionality of the position-wise feed-forward inner layer.
+        '''
+
+        super().__init__()
+
+        self.rmsnorm_1 = RMSNorm(d_model, device=device, dtype=dtype)
+        self.mha = CausalMultiheadAttention(
+            d_model, num_heads, rope=rope, device=device, dtype=dtype)
+        self.rmsnorm_2 = RMSNorm(d_model, device=device, dtype=dtype)
+        self.swiglu = SwiGLU(d_model, d_ff, device=device, dtype=dtype)
+
+    def forward(
+        self,
+        x: Float[Tensor, "... seq d_model"],
+        token_positions: Int[Tensor, "... seq"] | None = None,
+    ) -> Float[Tensor, "... seq d_model"]:
+        # Sublayer 1: Multi-head Self-Attention
+        attn_output = self.mha(self.rmsnorm_1(x),
+                               token_positions=token_positions)
+        x = x + attn_output
+        # Sublayer 2: Position-wise Feed-Forward Network
+        ffn_output = self.swiglu(self.rmsnorm_2(x))
+        x = x + ffn_output
+        return x
