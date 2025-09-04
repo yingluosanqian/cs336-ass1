@@ -10,6 +10,13 @@ from .nn_function import scaled_dot_product_attention
 
 class Linear(nn.Module):
     def __init__(self, in_features: int, out_features: int, device=None, dtype=None):
+        '''
+        Args:
+            in_features (int): final dimension of the input
+            out_features (int): final dimension of the output
+            device (torch.device | None = None): Device to store the parameters on
+            dtype (torch.dtype | None): = None Data type of the parameters
+        '''
         super().__init__()
         self.weights: Float[Tensor, "d_out d_in"] = nn.Parameter(
             init_linear_weights((out_features, in_features),
@@ -22,6 +29,13 @@ class Linear(nn.Module):
 
 class Embedding(nn.Module):
     def __init__(self, num_embeddings: int, embedding_dim: int, device=None, dtype=None):
+        '''
+        Args:
+            num_embeddings (int): Size of the vocabulary
+            embedding_dim (int): Dimension of the embedding vectors, i.e., dmodel
+            device (torch.device | None = None): Device to store the parameters on
+            dtype (torch.dtype | None = None): Data type of the parameters
+        '''
         super().__init__()
         self.weights: Float[Tensor, "vocab_size d_model"] = nn.Parameter(
             init_embedding_weights((num_embeddings, embedding_dim),
@@ -34,6 +48,13 @@ class Embedding(nn.Module):
 
 class RMSNorm(nn.Module):
     def __init__(self, d_model: int, eps: float = 1e-5, device=None, dtype=None):
+        '''
+        Args:
+            d_model (int): Hidden dimension of the model
+            eps (float): = 1e-5 Epsilon value for numerical stability
+            device (torch.device | None = None): Device to store the parameters on
+            dtype (torch.dtype | None): = None Data type of the parameters
+        '''
         super().__init__()
         self.d_model = d_model
         self.eps = eps
@@ -75,6 +96,13 @@ class SwiGLU(nn.Module):
 
 class RotaryPositionalEmbedding(nn.Module):
     def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
+        '''
+        Args:
+            theta (float): Θ value for the RoPE
+            d_k (int): dimension of query and key vectors
+            max_seq_len (int): Maximum sequence length that will be inputted
+            device (torch.device | None = None): Device to store the buffer on
+        '''
         super().__init__()
         self.cos_value: Float[Tensor, "max_seq_len half_d_k"]
         self.sin_value: Float[Tensor, "max_seq_len half_d_k"]
@@ -123,6 +151,11 @@ class CausalMultiheadAttention(nn.Module):
     def __init__(self, d_model: int, num_heads: int,
                  rope: RotaryPositionalEmbedding | None = None,
                  dtype=None, device=None) -> None:
+        '''
+        Args:
+            d_model (int): Dimensionality of the Transformer block inputs.
+            num_heads (int): Number of heads to use in multi-head self-attention.
+        '''
         super().__init__()
         if d_model % num_heads != 0:
             raise ValueError(
