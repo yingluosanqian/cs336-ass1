@@ -5,6 +5,7 @@ from einops import rearrange, einsum
 from jaxtyping import Float, Int
 
 from .initialize import init_linear_weights, init_embedding_weights, init_rmsnorm_weights
+from .nn_function import scaled_dot_product_attention
 
 
 class Linear(nn.Module):
@@ -64,26 +65,12 @@ class SwiGLU(nn.Module):
     def __init__(self, d_model: int, d_ff: int, device=None, dtype=None):
         super().__init__()
         self.silu = SiLu()
-        self.w1_weight: Float[Tensor, "d_ff d_model"] = nn.Parameter(
-            init_linear_weights((d_ff, d_model), d_model,
-                                d_ff, device=device, dtype=dtype)
-        )
-        self.w2_weight: Float[Tensor, "d_model d_ff"] = nn.Parameter(
-            init_linear_weights((d_model, d_ff), d_ff,
-                                d_model, device=device, dtype=dtype)
-        )
-        self.w3_weight: Float[Tensor, "d_ff d_model"] = nn.Parameter(
-            init_linear_weights((d_ff, d_model), d_model,
-                                d_ff, device=device, dtype=dtype)
-        )
+        self.w1 = Linear(d_model, d_ff, device=device, dtype=dtype)
+        self.w2 = Linear(d_ff, d_model, device=device, dtype=dtype)
+        self.w3 = Linear(d_model, d_ff, device=device, dtype=dtype)
 
-    def forward(
-        self,
-        x: Float[Tensor, "... d_model"],
-    ) -> Float[Tensor, "... d_model"]:
-        x_w1 = einsum(x, self.w1_weight, "... d_model, dff d_model -> ... dff")
-        x_w3 = einsum(x, self.w3_weight, "... d_model, dff d_model -> ... dff")
-        return einsum(self.silu(x_w1) * x_w3, self.w2_weight, "... dff, d_model dff -> ... d_model")
+    def forward(self, x: Float[Tensor, "... d_model"]) -> Float[Tensor, "... d_model"]:
+        return self.w2(self.silu(self.w1(x)) * self.w3(x))
 
 
 class RotaryPositionalEmbedding(nn.Module):
@@ -113,9 +100,9 @@ class RotaryPositionalEmbedding(nn.Module):
             raise ValueError(
                 f"Input d_k ({d_k}) does not match layer d_k ({self.d_k})")
         cos_value: Float[Tensor,
-                         "seq half_d_k"] = self.cos_value[token_positions]
+                         "... seq half_d_k"] = self.cos_value[token_positions]
         sin_value: Float[Tensor,
-                         "seq half_d_k"] = self.sin_value[token_positions]
+                         "... seq half_d_k"] = self.sin_value[token_positions]
 
         x = rearrange(
             x, "... seq (half_d_k pair) -> ... seq half_d_k pair", pair=2)
@@ -130,3 +117,60 @@ class RotaryPositionalEmbedding(nn.Module):
         rope_x = rearrange([rotated_x0, rotated_x1],
                            "pair ... seq half_d_k -> ... seq (half_d_k pair)", pair=2)
         return rope_x
+
+
+class CausalMultiheadAttention(nn.Module):
+    def __init__(self, d_model: int, num_heads: int,
+                 rope: RotaryPositionalEmbedding | None = None,
+                 dtype=None, device=None) -> None:
+        super().__init__()
+        if d_model % num_heads != 0:
+            raise ValueError(
+                f"d_model ({d_model}) must be divisible by num_heads ({num_heads})")
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.head_dim = d_model // num_heads
+        self.rope = rope
+
+        # (num_heads, d_model) for each of Q, K, V
+        self.qkv_proj = nn.Parameter(
+            torch.cat([
+                init_linear_weights((d_model, d_model), d_model,
+                                    d_model, device=device, dtype=dtype),
+                init_linear_weights((d_model, d_model), d_model,
+                                    d_model, device=device, dtype=dtype),
+                init_linear_weights((d_model, d_model), d_model,
+                                    d_model, device=device, dtype=dtype),
+            ], dim=0)
+        )
+        self.o_proj = Linear(num_heads * self.head_dim,
+                             d_model, dtype=dtype, device=device)
+
+    def forward(
+        self,
+        x: Float[Tensor, "... seq d_model"],
+        token_positions: Float[Tensor, "... seq"] | None,
+    ) -> Float[Tensor, "... seq d_model"]:
+        # Q, K, V
+        QKV = einsum(x, self.qkv_proj,
+                     "... seq model, model_3 model -> ... seq model_3")
+        Q, K, V = (
+            rearrange(x, "... seq (num_heads d_k) -> ... num_heads seq d_k",
+                      num_heads=self.num_heads)
+            for x in QKV.split(self.d_model, dim=-1)
+        )
+        # RoPE
+        if token_positions is not None:
+            if self.rope is None:
+                raise ValueError(
+                    "Rotary positional embedding (RoPE) is not set in this layer.")
+            Q = self.rope(Q, token_positions)
+            K = self.rope(K, token_positions)
+
+        # Causal Masked Attention
+        causal_mask = torch.tril(torch.ones(
+            x.shape[-2], x.shape[-2], dtype=torch.bool, device=x.device))
+        attn = scaled_dot_product_attention(Q, K, V, attn_mask=causal_mask)
+        attn = rearrange(
+            attn, "... num_heads seq d_v -> ... seq (num_heads d_v)")
+        return self.o_proj(attn)
